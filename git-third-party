@@ -107,18 +107,27 @@ def add(args: list[str]) -> None:
 	}
 	_update_at(name)
 
+def _get_all_names() -> list[str]:
+	return list(config['repos'].keys())
+
+def _get_names_from_paths(paths: list[str]) -> list[str]:
+	if len(paths) == 0:
+		raise GitThirdPartyException("excepted non-empty list of arguments")
+	if paths == ['--all']:
+		return _get_all_names()
+	return list(set(map(_get_path_rel_to_dir, paths)))
+
 def update(args: list[str]) -> None:
-	if len(args) != 1:
-		print(f'Expected `{EXE_NAME} update <PATH>`, got {args}', file=sys.stderr)
-		exit(1)
-	name = _get_path_rel_to_dir(args[0])
-	_update_at(name)
+	names = _get_names_from_paths(args)
+	for name in names:
+		_update_at(name)
 
 def save(args: list[str]) -> None:
-	if len(args) != 1:
-		print(f'Expected `{EXE_NAME} save <PATH>`, got {args}', file=sys.stderr)
-		exit(1)
-	name = _get_path_rel_to_dir(args[0])
+	names = _get_names_from_paths(args)
+	for name in names:
+		_save_at(name)
+
+def _save_at(name: str) -> None:
 	_dirty_check(name)
 	conf = config['repos'][name]
 	patches_dir = _get_patches_dir(name)
@@ -134,13 +143,20 @@ modes = {
 	"add": add,
 	"update": update,
 	"save": save,
+	"help": lambda x: show_help(*x, file=sys.stdout, exit_code=0)
 }
+
+def show_help(*args, file=sys.stderr, exit_code=1):
+	if len(args) != 0:
+		print(f"help gets no arguments, got {args}", file=file)
+		exit_code = 1
+	print(f"USAGE: {EXE_NAME} {'|'.join(modes.keys())}", file=file)
+	exit(exit_code)
 
 mode = sys.argv[1] if len(sys.argv) > 1 else '<not provided>'
 mode_handler = modes.get(mode, None)
 if mode_handler is None:
-	print(f"unknown mode {mode}, expected {EXE_NAME} {'|'.join(modes.keys())}", file=sys.stderr)
-	exit(1)
+	show_help()
 try:
 	mode_handler(sys.argv[2:])
 except GitThirdPartyException as e:
