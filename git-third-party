@@ -126,7 +126,7 @@ def save(args: list[str]) -> None:
 		patches_dir.joinpath(str(i)).unlink()
 	patches_dir.mkdir(parents=True, exist_ok=True)
 	target_dir = top_dir.joinpath(*name.split('/'))
-	subprocess.run(['git', 'format-patch', f'{conf["commit"]}..HEAD', '--numbered-files', '-o', patches_dir], check=True, cwd=target_dir)
+	subprocess.run(['git', 'format-patch', f'{conf["commit"]}..HEAD', '--no-numbered', '--numbered-files', '-o', patches_dir], check=True, cwd=target_dir)
 	new_patches = subprocess.run(['git', 'rev-list', '--count', f'{conf["commit"]}..HEAD'], check=True, cwd=target_dir, text=True, capture_output=True)
 	conf['patches'] = int(new_patches.stdout.strip())
 
