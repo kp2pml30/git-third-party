@@ -72,7 +72,7 @@ def _update_at(name: str) -> None:
 	patches_dir = _get_patches_dir(name)
 	patch_files = [patches_dir.joinpath(str(i)) for i in range(1, conf['patches'] + 1)]
 	if len(patch_files) != 0:
-		subprocess.run(['git', 'am', *patch_files], cwd=target_dir)
+		subprocess.run(['git', 'am', *patch_files], cwd=target_dir, check=True)
 
 class GitThirdPartyException(Exception):
 	pass
