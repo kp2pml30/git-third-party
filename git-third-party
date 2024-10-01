@@ -22,13 +22,13 @@ EXE_NAME = 'git third-party'
 import subprocess
 
 try:
-	top_dir = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], text=True)
+	top_dir_str = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], text=True)
 except:
 	exit(1)
 
 from pathlib import Path
 import os
-top_dir = Path(top_dir.strip())
+top_dir = Path(top_dir_str.strip())
 cur_dir = Path(os.getcwd())
 
 config_path = top_dir.joinpath('.gitthirdparty')
@@ -66,8 +66,8 @@ def _update_at(name: str) -> None:
 	if rs.returncode != 0:
 		subprocess.run(['git', 'fetch', 'origin', '--depth=1', conf['commit']], check=True, cwd=target_dir)
 		subprocess.run(['git', 'checkout', conf['commit']], check=True, cwd=target_dir)
-	subprocess.run(['git', 'submodule', 'update', '--init', '--recursive'], check=True, cwd=target_dir)
-	subprocess.run(['git', 'submodule', 'update', '--recursive'], check=True, cwd=target_dir)
+	subprocess.run(['git', 'submodule', 'update', '--init', '--recursive', '--depth', '1'], check=True, cwd=target_dir)
+	subprocess.run(['git', 'submodule', 'update', '--recursive', '--depth', '1'], check=True, cwd=target_dir)
 	# apply patches
 	patches_dir = _get_patches_dir(name)
 	patch_files = [patches_dir.joinpath(str(i)) for i in range(1, conf['patches'] + 1)]
