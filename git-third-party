@@ -67,7 +67,11 @@ def _update_at(name: str) -> None:
 		subprocess.run(['git', 'fetch', 'origin', '--depth=1', conf['commit']], check=True, cwd=target_dir)
 		subprocess.run(['git', 'checkout', conf['commit']], check=True, cwd=target_dir)
 	subprocess.run(['git', 'submodule', 'update', '--init', '--recursive', '--depth', '1'], check=True, cwd=target_dir)
-	subprocess.run(['git', 'submodule', 'update', '--recursive', '--depth', '1'], check=True, cwd=target_dir)
+	submodules = conf.get('submodules', None)
+	if submodules is None:
+		subprocess.run(['git', 'submodule', 'update', '--recursive', '--depth', '1'], check=True, cwd=target_dir)
+	elif len(submodules) != 0:
+		subprocess.run(['git', 'submodule', 'update', '--recursive', '--depth', '1', '--'] + submodules, check=True, cwd=target_dir)
 	# apply patches
 	patches_dir = _get_patches_dir(name)
 	patch_files = [patches_dir.joinpath(str(i)) for i in range(1, conf['patches'] + 1)]
