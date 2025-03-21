@@ -1,10 +1,10 @@
 # Git third party
 
-Small zero-dependency python utility that is an alternative to [git-submodules](https://git-scm.com/book/en/v2/Git-Tools-Submodules) and [git-subtree](https://manpages.debian.org/testing/git-man/git-subtree.1.en.html), that allows patching third-party code, storing commits in your tree
+Tool for patching third-party libraries without need to fork them
 
-No need to fork, no need to store all code in your tree, store just your patches
+This is a small zero-dependency utility that is an alternative to [git-submodules](https://git-scm.com/book/en/v2/Git-Tools-Submodules) and [git-subtree](https://manpages.debian.org/testing/git-man/git-subtree.1.en.html). It stores only delta (changes) inside your tree
 
-**WARNING:** it is a raw prototype
+This tool is not oriented for highly concurrent modification of third-party tools by multiple users
 
 ## Usage
 ```bash
@@ -25,9 +25,11 @@ git-third-party update third-party/RustPython
 
 ## How it works?
 
-It stores (at `/.gitthirdparty`) a configutation that describes all third party repositories and patches (at `/.gitthirdparty-patches/<local/repo/path>`). `save` command updates the patches, `update` command reapplies them
+It stores (at `/.git-third-party/`) a configuration that describes all third party repositories and patches. `save` command updates the patches, `update` command reapplies them
 
-## Todo
-- [ ] commit hooks
-- [ ] updating all
-- [ ] automated tests
+Directory `.git-third-party` must be controlled by git, while third-party repos should not
+
+Best effort is done to keep patches deterministic and strip all metadata from them, which includes:
+- git version
+- commit hash (which depends on committer)
+- ...
