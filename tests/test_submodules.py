@@ -1,6 +1,7 @@
 """Submodules, offline. A repo with a local-path submodule must be checked out
 and survive a save -> wipe -> update round-trip without losing information."""
 
+import json
 import shutil
 
 from fixtures import commit_files, git, snapshot_worktree, tree_sha
@@ -36,6 +37,35 @@ def test_submodule_survives_roundtrip(gtp, workspace, base_env, upstreams):
 	# come back identical.
 	assert snapshot_worktree(target) == before_files
 	assert tree_sha(target, base_env) == before_tree
+
+
+def test_update_with_explicit_submodule_list(gtp, workspace, upstreams):
+	_, target = _add_parent(gtp, workspace, upstreams)
+	# Pin an explicit submodule list in the config and re-materialize, taking
+	# the `submodules` branch of update.
+	cfg_path = workspace / '.git-third-party' / 'config.json'
+	cfg = json.loads(cfg_path.read_text())
+	cfg['repos']['third-party/parent']['submodules'] = ['sub']
+	cfg_path.write_text(json.dumps(cfg))
+
+	shutil.rmtree(target)
+	assert gtp('update', 'third-party/parent').returncode == 0
+	assert (target / 'sub' / 'child.txt').read_text() == 'child-v1\n'
+
+
+def test_empty_submodule_list_still_checks_out(gtp, workspace, upstreams):
+	_, target = _add_parent(gtp, workspace, upstreams)
+	cfg_path = workspace / '.git-third-party' / 'config.json'
+	cfg = json.loads(cfg_path.read_text())
+	cfg['repos']['third-party/parent']['submodules'] = []
+	cfg_path.write_text(json.dumps(cfg))
+
+	shutil.rmtree(target)
+	assert gtp('update', 'third-party/parent').returncode == 0
+	# NOTE: documents current behavior — `submodules: []` does NOT skip checkout.
+	# `git submodule update --init --recursive` runs unconditionally first, so
+	# the submodule is materialized regardless of the list.
+	assert (target / 'sub' / 'child.txt').read_text() == 'child-v1\n'
 
 
 def test_patch_alongside_submodule_roundtrip(gtp, workspace, base_env, upstreams):

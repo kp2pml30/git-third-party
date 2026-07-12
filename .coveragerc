@@ -1,0 +1,9 @@
+[run]
+branch = true
+# The tool is an extensionless script imported by path, so filter by filename
+# rather than module name.
+include =
+	*/git-third-party
+
+[report]
+show_missing = true

@@ -10,10 +10,15 @@ Runnable as a script to materialize the fixtures for manual inspection:
     python tests/fixtures.py /tmp/gtp-fixtures
 """
 
+import contextlib
+import importlib.util
+import io
 import json
 import os
 import subprocess
 import sys
+from dataclasses import dataclass
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
 # The tool under test.
@@ -128,16 +133,54 @@ def make_workspace(ws: Path, env: dict) -> Path:
 	return ws
 
 
+@dataclass
+class ToolResult:
+	returncode: int
+	stdout: str
+	stderr: str
+
+
+def _load_tool():
+	"""Import the extensionless `git-third-party` script as a module (cached).
+
+	Driving the tool in-process (rather than as a subprocess) lets `pytest-cov`
+	measure it directly, so plain `--cov`/`--cov-branch` reports real coverage.
+	"""
+	loader = SourceFileLoader('git_third_party', str(TOOL))
+	spec = importlib.util.spec_from_loader(loader.name, loader)
+	module = importlib.util.module_from_spec(spec)
+	loader.exec_module(module)
+	return module
+
+
+_TOOL_MODULE = None
+
+
 def run_tool(
 	workspace: Path, args, cwd: Path | None = None, env: dict | None = None
-) -> subprocess.CompletedProcess:
-	return subprocess.run(
-		[sys.executable, str(TOOL), *args],
-		cwd=str(cwd or workspace),
-		env=env,
-		capture_output=True,
-		text=True,
-	)
+) -> ToolResult:
+	global _TOOL_MODULE
+	if _TOOL_MODULE is None:
+		_TOOL_MODULE = _load_tool()
+
+	out, err = io.StringIO(), io.StringIO()
+	prev_cwd = os.getcwd()
+	prev_env = os.environ.copy()
+	try:
+		os.chdir(str(cwd or workspace))
+		if env is not None:
+			os.environ.clear()
+			os.environ.update(env)
+		with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+			try:
+				rc = _TOOL_MODULE.main(list(args))
+			except SystemExit as exc:
+				rc = exc.code if isinstance(exc.code, int) else 1
+	finally:
+		os.chdir(prev_cwd)
+		os.environ.clear()
+		os.environ.update(prev_env)
+	return ToolResult(rc if rc is not None else 0, out.getvalue(), err.getvalue())
 
 
 def _mk(path: Path) -> Path:

@@ -23,6 +23,20 @@ Materialize the fixtures for manual inspection:
 python tests/fixtures.py /tmp/gtp-fixtures
 ```
 
+## Coverage
+
+The tool is imported and driven **in-process** (see `run_tool` in
+`fixtures.py`), so `pytest-cov` measures it directly — no subprocess-coverage
+plumbing needed. Branch coverage:
+
+```bash
+nix develop -c pytest --cov --cov-branch --cov-report=term-missing tests
+```
+
+`--cov-branch` is the branch-coverage flag; the bare `--cov` plus the `include`
+filter in [`.coveragerc`](../../../../.coveragerc) scopes the report to the
+`git-third-party` script. Add `--cov-report=html` for an annotated tree.
+
 ## What is covered
 
 - `test_add.py` — registering a repo, checkout at the pinned commit, and every

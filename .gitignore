@@ -18,6 +18,10 @@ __pycache__/
 .ruff_cache
 .pytest_cache
 .mypy_cache
+# coverage data (the .coveragerc config itself is tracked)
+.coverage
+.coverage.*
+htmlcov/
 
 # project: third-party working trees (tracked config lives in .git-third-party)
 /third-party
