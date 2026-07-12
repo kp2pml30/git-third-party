@@ -1,5 +1,9 @@
 indent-width = 2
 
+include = [
+    "git-third-party"
+]
+
 [format]
 indent-style = "tab"
 quote-style = "single"
