@@ -18,6 +18,29 @@
       forEachSystem = lib.genAttrs (import inputs.systems);
     in
     {
+      # First-class library: `collectSources` turns a tree containing a
+      # `.git-third-party/` directory into a fully materialized, patched source
+      # derivation. Consume it as `git-third-party.lib.<system>.collectSources`.
+      lib = forEachSystem (
+        system:
+        let
+          pkgs = import nixpkgs { inherit system; };
+        in
+        import ./collect-sources.nix { inherit pkgs; }
+      );
+
+      # Same capability injected into `pkgs.lib` via `lib.extend`, for callers
+      # who prefer to reach it as `pkgs.lib.gitThirdParty.collectSources`.
+      # (Extending your own flake `lib` output above is the idiomatic path;
+      # this overlay is here to show that adding to `pkgs.lib` is possible.)
+      overlays.default = final: _prev: {
+        lib = _prev.lib.extend (
+          _lfinal: _lprev: {
+            gitThirdParty = import ./collect-sources.nix { pkgs = final; };
+          }
+        );
+      };
+
       packages = forEachSystem (
         system:
         let
