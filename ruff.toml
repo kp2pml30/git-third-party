@@ -7,3 +7,8 @@ line-ending = "lf"
 
 skip-magic-trailing-comma = false
 docstring-code-format = true
+
+[lint]
+ignore = ["E741"]
+
+extend-select = ["I"]

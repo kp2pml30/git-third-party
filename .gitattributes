@@ -1,0 +1,16 @@
+# Ensure consistent line endings
+* text=auto eol=lf
+
+# Binary files — no diff, no merge
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.gz binary
+*.xz binary
+
+# Vendored third-party working trees — not counted as project code.
+# (These live under /third-party and are gitignored, but mark the path in case
+# any tracked snapshot ever lands here.)
+third-party/** linguist-vendored
