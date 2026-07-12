@@ -96,14 +96,15 @@
         ''
       );
 
-      checks = forEachSystem (system: {
-        pre-commit-check = inputs.git-hooks.lib.${system}.run {
-          src = ./.;
-          hooks =
-            let
-              pkgs = import nixpkgs { inherit system; };
-            in
-            {
+      checks = forEachSystem (
+        system:
+        let
+          pkgs = import nixpkgs { inherit system; };
+        in
+        {
+          pre-commit-check = inputs.git-hooks.lib.${system}.run {
+            src = ./.;
+            hooks = {
               # Validate commit messages against conventional-commit rules
               # (runs on the commit-msg stage, so it is skipped by
               # `nix flake check` / `pre-commit run --all-files`).
@@ -119,8 +120,29 @@
               nixfmt.enable = true;
               ruff-format.enable = true;
             };
-        };
-      });
+          };
+
+          # The pytest suite. Fully offline (it builds local git repos in a
+          # temp dir), so it runs inside the nix sandbox.
+          tests =
+            pkgs.runCommandLocal "git-third-party-tests"
+              {
+                nativeBuildInputs = [
+                  (pkgs.python3.withPackages (ps: [ ps.pytest ]))
+                  pkgs.git
+                ];
+              }
+              ''
+                cp -r ${./.} src
+                chmod -R u+w src
+                export HOME="$TMPDIR/home"
+                mkdir -p "$HOME"
+                cd src
+                pytest -q tests
+                touch "$out"
+              '';
+        }
+      );
 
       devShells = forEachSystem (
         system:
@@ -131,7 +153,11 @@
         {
           default = pkgs.mkShell {
             inherit shellHook;
-            buildInputs = enabledPackages ++ [ pkgs.python3 ];
+            buildInputs = enabledPackages ++ [
+              pkgs.python3
+              pkgs.python3Packages.pytest
+              pkgs.python3Packages.pytest-cov
+            ];
           };
         }
       );
