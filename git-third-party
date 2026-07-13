@@ -97,12 +97,21 @@ def _get_patches_dir(name: str) -> Path:
 
 def _dirty_check(name: str) -> None:
 	target_dir = top_dir.joinpath(*name.split('/'))
-	for opts in ([], ['--cached']):
-		rs = subprocess.run(
-			[GIT, 'diff', '--exit-code', '--quiet', *opts], check=False, cwd=target_dir
+	# `--untracked-files=all` so a brand-new local file counts as dirt, and
+	# `--ignore-submodules=none` so a hostile `diff.ignoreSubmodules` config can
+	# not hide a modified submodule. A non-empty porcelain listing is dirt; it
+	# also names the offending paths, which we surface to the user.
+	rs = subprocess.run(
+		[GIT, 'status', '--porcelain', '--untracked-files=all', '--ignore-submodules=none'],
+		check=True,
+		cwd=target_dir,
+		text=True,
+		capture_output=True,
+	)
+	if rs.stdout.strip():
+		raise GitThirdPartyException(
+			f'repo {name} is dirty ( {target_dir} ):\n{rs.stdout.rstrip()}'
 		)
-		if rs.returncode != 0:
-			raise GitThirdPartyException(f'repo {name} is dirty ( {target_dir} )')
 
 
 def _update_at(name: str) -> None:
