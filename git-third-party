@@ -114,6 +114,112 @@ def _dirty_check(name: str) -> None:
 		)
 
 
+def _patch_id(diff: str, cwd: Path) -> str | None:
+	"""Stable patch-id of a diff/patch, or None when there is nothing to hash.
+
+	`--stable` hashes only the diff hunks, ignoring the commit hash, author,
+	date and message — so a patch re-applied by `git am` compares equal to the
+	saved patch file it came from, which is exactly the metadata-independence the
+	rest of the tool relies on.
+	"""
+	rs = subprocess.run(
+		[GIT, 'patch-id', '--stable'],
+		input=diff,
+		text=True,
+		capture_output=True,
+		check=True,
+		cwd=cwd,
+	)
+	out = rs.stdout.strip()
+	# Empty for a patch with no textual diff (e.g. an empty or merge commit).
+	return out.split()[0] if out else None
+
+
+def _unsaved_commits_check(name: str) -> None:
+	"""Refuse to overwrite local commits that were never `save`d.
+
+	`update` detaches to the base commit and replays the *saved* patch series, so
+	any commit on top that no patch file records would be silently orphaned. We
+	compare the current history above the base against the saved patches by
+	patch-id, keep the longest matching prefix (K), and error when the checkout
+	is *ahead* — carrying `commits(base..HEAD) - K` unrecorded commits.
+	"""
+	conf = config['repos'][name]
+	target_dir = top_dir.joinpath(*name.split('/'))
+	base = conf['commit']
+
+	# Nothing checked out yet (fresh `add` / freshly `init`-ed dir): nothing to
+	# protect.
+	if (
+		subprocess.run(
+			[GIT, 'rev-parse', '--verify', '--quiet', 'HEAD'],
+			check=False,
+			cwd=target_dir,
+			capture_output=True,
+		).returncode
+		!= 0
+	):
+		return
+
+	# Base not in this checkout: we cannot relate HEAD to the saved series (most
+	# likely the pin was bumped). Let update fetch + reapply; the worktree dirty
+	# check still protects uncommitted work.
+	if (
+		subprocess.run(
+			[GIT, 'cat-file', '-e', f'{base}^{{commit}}'],
+			check=False,
+			cwd=target_dir,
+			capture_output=True,
+		).returncode
+		!= 0
+	):
+		logging.warning(
+			f'base commit {base} not present in {name}, skipping unsaved-commits check'
+		)
+		return
+
+	revs = subprocess.run(
+		[GIT, 'rev-list', '--reverse', f'{base}..HEAD'],
+		check=True,
+		cwd=target_dir,
+		text=True,
+		capture_output=True,
+	).stdout.split()
+	current_ids = [
+		_patch_id(
+			subprocess.run(
+				[GIT, 'diff-tree', '--patch', '--no-commit-id', rev],
+				check=True,
+				cwd=target_dir,
+				text=True,
+				capture_output=True,
+			).stdout,
+			target_dir,
+		)
+		for rev in revs
+	]
+
+	patches_dir = _get_patches_dir(name)
+	saved_ids = [
+		_patch_id(patches_dir.joinpath(str(i)).read_text(), target_dir)
+		for i in range(1, conf['patches'] + 1)
+	]
+
+	# Longest common prefix of patch-ids; a None (unhashable commit) stops it.
+	matched = 0
+	for cur, saved in zip(current_ids, saved_ids):
+		if cur is None or cur != saved:
+			break
+		matched += 1
+
+	ahead = len(current_ids) - matched
+	if ahead > 0:
+		raise GitThirdPartyException(
+			f'repo {name} is {ahead} commit(s) ahead of its saved patches '
+			f'( {target_dir} ); run `save` first or reset those commits'
+		)
+
+
 def _update_at(name: str) -> None:
 	conf = config['repos'][name]
 	target_dir = top_dir.joinpath(*name.split('/'))
@@ -126,6 +232,7 @@ def _update_at(name: str) -> None:
 		)
 
 	_dirty_check(name)
+	_unsaved_commits_check(name)
 	rs = subprocess.run(
 		[GIT, '-c', 'advice.detachedHead=false', 'checkout', conf['commit']],
 		check=False,
