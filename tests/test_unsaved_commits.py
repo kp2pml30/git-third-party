@@ -6,6 +6,8 @@ history, and refuses when the checkout is *ahead* — i.e. carries commits beyon
 that prefix that no patch file records.
 """
 
+import json
+
 from fixtures import commit_files, git
 
 
@@ -57,3 +59,58 @@ def test_update_allows_extra_saved_patches(gtp, workspace, base_env, upstreams):
 	# Both patches come back.
 	subjects = git(['log', '--format=%s'], target, base_env).stdout.splitlines()
 	assert subjects[:2] == ['feat: second', 'feat: patch lib']
+
+
+def test_update_refuses_amended_commit(gtp, workspace, base_env, upstreams):
+	"""A commit rewritten in place (same count, different content) diverges from
+	the saved patch at that position and must be refused."""
+	target = _add_and_save_one(gtp, workspace, base_env, upstreams)
+	simple = upstreams['simple']
+	# Replace the single saved commit with a different one at the same position.
+	git(['reset', '--hard', simple['c1']], target, base_env)
+	commit_files(target, base_env, {'lib.txt': 'rewritten\n'}, 'feat: rewritten')
+
+	res = gtp('update', 'third-party/simple')
+	assert res.returncode == 1
+	assert 'ahead' in res.stderr
+	assert (target / 'lib.txt').read_text() == 'rewritten\n'
+
+
+def test_update_refuses_unsaved_empty_commit(gtp, workspace, base_env, upstreams):
+	"""An empty commit has no diff (patch-id None); it is still unrecorded work
+	and must be refused rather than dropped."""
+	simple = upstreams['simple']
+	assert (
+		gtp('add', 'third-party/simple', str(simple['path']), simple['c1']).returncode == 0
+	)
+	target = workspace / 'third-party' / 'simple'
+	git(['commit', '--allow-empty', '-m', 'chore: empty'], target, base_env)
+
+	res = gtp('update', 'third-party/simple')
+	assert res.returncode == 1
+	assert 'ahead' in res.stderr
+	assert git(['log', '--format=%s'], target, base_env).stdout.splitlines()[0] == (
+		'chore: empty'
+	)
+
+
+def test_update_skips_check_when_base_bumped(gtp, workspace, base_env, upstreams):
+	"""Bumping the pinned commit to one absent from the checkout can't be related
+	to the saved series, so the guard steps aside and update re-pins."""
+	target = _add_and_save_one(gtp, workspace, base_env, upstreams)
+	simple = upstreams['simple']
+
+	# Repin to c2, which was never fetched into this shallow checkout.
+	cfg_path = workspace / '.git-third-party' / 'config.json'
+	cfg = json.loads(cfg_path.read_text())
+	cfg['repos']['third-party/simple']['commit'] = simple['c2']
+	cfg_path.write_text(json.dumps(cfg))
+
+	res = gtp('update', 'third-party/simple')
+	assert res.returncode == 0, res.stderr
+	# Re-pinned base is now c2, with the saved patch replayed on top.
+	base_sha = git(
+		['rev-list', '--max-parents=0', 'HEAD'], target, base_env
+	).stdout.strip()
+	assert base_sha == simple['c2']
+	assert (target / 'lib.txt').read_text() == 'patched\n'

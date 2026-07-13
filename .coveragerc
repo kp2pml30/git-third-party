@@ -7,3 +7,5 @@ include =
 
 [report]
 show_missing = true
+# The suite drives every branch in-process; regressions must not slip through.
+fail_under = 100

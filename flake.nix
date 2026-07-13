@@ -128,7 +128,10 @@
             pkgs.runCommandLocal "git-third-party-tests"
               {
                 nativeBuildInputs = [
-                  (pkgs.python3.withPackages (ps: [ ps.pytest ]))
+                  (pkgs.python3.withPackages (ps: [
+                    ps.pytest
+                    ps.pytest-cov
+                  ]))
                   pkgs.git
                 ];
               }
@@ -138,7 +141,10 @@
                 export HOME="$TMPDIR/home"
                 mkdir -p "$HOME"
                 cd src
-                pytest -q tests
+                # `--cov` + `.coveragerc`'s `fail_under = 100` gate the build on
+                # full branch coverage of the tool. `--cov` must trail the path
+                # (its optional arg would otherwise swallow `tests`).
+                pytest -q tests --cov
                 touch "$out"
               '';
         }
