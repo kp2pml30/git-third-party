@@ -50,6 +50,12 @@ git-third-party update third-party/RustPython
 # ^ git-third-party update <relative path>
 ```
 
+Without installing, you can run it straight from the flake:
+
+```bash
+nix run github:kp2pml30/git-third-party -- add third-party/RustPython <url> <commit>
+```
+
 ### How it works
 
 It stores a configuration under `/.git-third-party/` that describes all
@@ -72,4 +78,4 @@ See [docs/contributing/](docs/contributing/README.md).
 
 ## License
 
-GPL-3.0 © 2024-2025 Kira Prokopenko
+GPL-3.0 (C) 2024-2026 Kira Prokopenko
