@@ -41,8 +41,8 @@ filter in [`.coveragerc`](../../../../.coveragerc) scopes the report to the
 
 - `test_add.py` — registering a repo, checkout at the pinned commit, and every
   rejection path (bad chars, outside the tree, non-ignored dir, duplicate).
-- `test_save.py` — patch recording, count bookkeeping, stale-patch pruning,
-  metadata stripping, dirty-worktree refusal.
+- `test_save.py` — patch recording, stale-patch pruning, metadata stripping,
+  dirty-worktree refusal.
 - `test_update.py` — the save → wipe → update round-trip proves **no
   information is lost**: the working tree and the content-addressed git tree
   object come back identical.
@@ -50,3 +50,16 @@ filter in [`.coveragerc`](../../../../.coveragerc) scopes the report to the
   survives the round-trip, offline.
 - `test_determinism.py` — save → update → save under different author/committer
   identities yields byte-for-byte identical patches.
+- `test_patch_names.py` — patch file names are the digest of the patch bytes,
+  the legacy positional layout migrates, and neither local git config nor the
+  enclosing repo's `.gitattributes` may alter the stored bytes.
+- `test_manifest_name.py` — `.git-third-party/manifest.json`, and the rename
+  from the `config.json` older versions wrote.
+- `test_no_push.py` — every managed checkout fetches from `origin` and refuses
+  to push to it.
+- `test_dirty_check.py` — the refusal to run on a repo with local modifications,
+  staged changes, untracked files, or a dirty submodule.
+- `test_unsaved_commits.py` — `update` refuses to orphan commits that no saved
+  patch records.
+- `test_cli.py` — the installed script as a real subprocess: argv parsing and
+  the `__main__` guard.

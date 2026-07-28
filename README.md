@@ -58,12 +58,23 @@ nix run github:kp2pml30/git-third-party -- add third-party/RustPython <url> <com
 
 ### How it works
 
-It stores a configuration under `/.git-third-party/` that describes all
+It stores a manifest under `/.git-third-party/manifest.json` that describes all
 third-party repositories and their patches. `save` updates the patches, `update`
-reapplies them.
+reapplies them. Older versions called that file `config.json`; it is still read,
+and renamed the next time the tool writes.
+
+Patch files are content addressed: the file name is the SHA-3 digest of the
+patch bytes, in Crockford Base32 (case-insensitive and safe in paths). The order
+of the series lives in `manifest.json`, so editing history in the middle of a
+series renames nothing — only the patches that actually changed show up in a
+diff. Repositories saved by an older version, which numbered patches `1`, `2`,
+`3`, …, are migrated in place by the next `save` or `update`.
 
 The `.git-third-party` directory must be tracked by git, while the third-party
-working trees themselves should not be.
+working trees themselves should not be. The tool keeps a `.gitattributes` and a
+`.gitignore` of its own in there: patch bytes are what their names are derived
+from, so the enclosing repository must not normalize their line endings. Commit
+those alongside the manifest.
 
 Each managed checkout gets its push url disabled (`origin` fetches from
 upstream, but pushing fails), so local patch commits can not accidentally be

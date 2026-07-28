@@ -110,18 +110,18 @@ def test_update_repoints_origin_at_the_configured_url(
 	gtp, workspace, base_env, upstreams
 ):
 	"""
-	The config is the source of truth for where the code comes from.
+	The manifest is the source of truth for where the code comes from.
 	"""
 	simple = upstreams['simple']
 	assert (
 		gtp('add', 'third-party/simple', str(simple['path']), simple['c1']).returncode == 0
 	)
 	target = workspace / 'third-party' / 'simple'
-	config_path = workspace / '.git-third-party' / 'config.json'
-	config = json.loads(config_path.read_text())
+	manifest_path = workspace / '.git-third-party' / 'manifest.json'
+	manifest = json.loads(manifest_path.read_text())
 	moved = str(upstreams['child']['path'])
-	config['repos']['third-party/simple']['url'] = moved
-	config_path.write_text(json.dumps(config, indent='\t') + '\n')
+	manifest['repos']['third-party/simple']['url'] = moved
+	manifest_path.write_text(json.dumps(manifest, indent='\t') + '\n')
 
 	# The pinned commit is already in the checkout, so nothing is fetched; only
 	# the remote is expected to move.

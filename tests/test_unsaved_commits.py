@@ -110,10 +110,10 @@ def test_update_skips_check_when_base_bumped(gtp, workspace, base_env, upstreams
 	simple = upstreams['simple']
 
 	# Repin to c2, which was never fetched into this shallow checkout.
-	cfg_path = workspace / '.git-third-party' / 'config.json'
-	cfg = json.loads(cfg_path.read_text())
-	cfg['repos']['third-party/simple']['commit'] = simple['c2']
-	cfg_path.write_text(json.dumps(cfg))
+	manifest_path = workspace / '.git-third-party' / 'manifest.json'
+	manifest = json.loads(manifest_path.read_text())
+	manifest['repos']['third-party/simple']['commit'] = simple['c2']
+	manifest_path.write_text(json.dumps(manifest))
 
 	res = gtp('update', 'third-party/simple')
 	assert res.returncode == 0, res.stderr

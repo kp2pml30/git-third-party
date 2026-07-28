@@ -1,4 +1,5 @@
-"""Guard against clobbering local work.
+"""
+Guard against clobbering local work.
 
 `_dirty_check` unit tests drive the guard directly by pointing the tool's module
 globals at a scratch repo; the integration tests exercise the same guard through
@@ -19,7 +20,9 @@ from fixtures import _load_tool, commit_files, git
 
 @pytest.fixture
 def tool():
-	"""A fresh in-process copy of the tool, independent of run_tool's cache."""
+	"""
+	A fresh in-process copy of the tool, independent of run_tool's cache.
+	"""
 	return _load_tool()
 
 
@@ -31,7 +34,9 @@ def _point_tool_at(tool, top: Path, env: dict) -> None:
 
 @pytest.fixture
 def unit_repo(tmp_path, base_env, tool):
-	"""A clean committed repo at <top>/pkg, with tool globals aimed at <top>."""
+	"""
+	A clean committed repo at <top>/pkg, with tool globals aimed at <top>.
+	"""
 	top = tmp_path / 'top'
 	target = top / 'pkg'
 	target.mkdir(parents=True)
@@ -43,7 +48,9 @@ def unit_repo(tmp_path, base_env, tool):
 
 @pytest.fixture
 def unit_repo_with_submodule(tmp_path, base_env, upstreams, tool):
-	"""Like `unit_repo`, but the target embeds `child` as a submodule at `sub`."""
+	"""
+	Like `unit_repo`, but the target embeds `child` as a submodule at `sub`.
+	"""
 	top = tmp_path / 'top'
 	target = top / 'pkg'
 	target.mkdir(parents=True)
@@ -169,7 +176,7 @@ def test_update_refuses_staged_change(gtp, workspace, base_env, upstreams):
 	assert (target / 'lib.txt').read_text() == 'staged edit\n'
 
 
-def test_save_refuses_staged_change(gtp, workspace, base_env, upstreams, read_config):
+def test_save_refuses_staged_change(gtp, workspace, base_env, upstreams, read_manifest):
 	target = _add_simple(gtp, base_env, upstreams, workspace)
 
 	(target / 'lib.txt').write_text('staged edit\n')
@@ -178,7 +185,7 @@ def test_save_refuses_staged_change(gtp, workspace, base_env, upstreams, read_co
 	assert res.returncode == 1
 	assert 'dirty' in res.stderr
 	# The recorded patch series is left untouched.
-	assert read_config()['repos']['third-party/simple']['patches'] == 1
+	assert len(read_manifest()['repos']['third-party/simple']['patches']) == 1
 
 
 def test_update_refuses_dirty_submodule(gtp, workspace, base_env, upstreams):

@@ -35,8 +35,15 @@ let
   collectSources =
     src:
     let
-      config = (builtins.fromJSON (builtins.readFile "${src}/.git-third-party/config.json")).repos;
-      repoNames = builtins.attrNames config;
+      # `config.json` is the name older versions of the tool wrote; a tree that has
+      # not been touched since still carries it, and must still build.
+      manifestPath =
+        let
+          new = "${src}/.git-third-party/manifest.json";
+        in
+        if builtins.pathExists new then new else "${src}/.git-third-party/config.json";
+      manifest = (builtins.fromJSON (builtins.readFile manifestPath)).repos;
+      repoNames = builtins.attrNames manifest;
 
       # Deterministic, path-safe derivation names (a repo path may contain "/").
       slug = name: builtins.hashString "sha256" name;
@@ -44,7 +51,7 @@ let
       fetchAndPatch =
         name:
         let
-          repo = config.${name};
+          repo = manifest.${name};
           # `builtins.fetchGit` can only fetch all submodules or none. Treat a
           # missing key or a non-empty `submodules` list as "fetch them"; an
           # explicit empty list means "skip submodules".
@@ -56,13 +63,18 @@ let
             shallow = true;
             name = "gtp-${slug name}-unpatched";
           };
+          # A list of content-addressed names, in series order. An integer is the
+          # legacy schema, where patches were named by their 1-based position.
+          patchNames =
+            if builtins.isInt repo.patches then
+              builtins.genList (i: toString (i + 1)) repo.patches
+            else
+              repo.patches;
         in
         pkgs.applyPatches {
           name = "gtp-${slug name}-patched";
           src = unpatched;
-          patches = builtins.genList (
-            i: "${src}/.git-third-party/patches/${name}/${toString (i + 1)}"
-          ) repo.patches;
+          patches = builtins.map (p: "${src}/.git-third-party/patches/${name}/${p}") patchNames;
         };
 
       repos = builtins.map (name: {

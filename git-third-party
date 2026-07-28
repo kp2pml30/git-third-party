@@ -18,6 +18,7 @@
 #
 
 import abc
+import hashlib
 import io
 import json
 import logging
@@ -25,6 +26,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import textwrap
 import typing
 from pathlib import Path
@@ -51,12 +53,14 @@ top_dir: Path
 cur_dir: Path
 SAVED_FILES_PATH: Path
 PATCHES_PATH: Path
-CONFIG_PATH: Path
-config: dict
+MANIFEST_PATH: Path
+LEGACY_MANIFEST_PATH: Path
+manifest: dict
 
 
 def _init_context() -> None:
-	global GIT, top_dir, cur_dir, SAVED_FILES_PATH, PATCHES_PATH, CONFIG_PATH, config
+	global GIT, top_dir, cur_dir, SAVED_FILES_PATH, PATCHES_PATH
+	global MANIFEST_PATH, LEGACY_MANIFEST_PATH, manifest
 
 	GIT = os.getenv('GIT', 'git')
 
@@ -76,16 +80,40 @@ def _init_context() -> None:
 
 	SAVED_FILES_PATH = top_dir.joinpath('.git-third-party')
 	PATCHES_PATH = SAVED_FILES_PATH.joinpath('patches')
-	CONFIG_PATH = SAVED_FILES_PATH.joinpath('config.json')
+	MANIFEST_PATH = SAVED_FILES_PATH.joinpath('manifest.json')
+	# The file this describes is not configuration -- nothing in it is a knob --
+	# it is the set of third-party repositories and the patch series each carries.
+	# `config.json` is what older versions called it; it is read, and renamed by
+	# the next write.
+	LEGACY_MANIFEST_PATH = SAVED_FILES_PATH.joinpath('config.json')
 
 	if not PATCHES_PATH.exists():
 		logging.info(f'patches directory does not exist, creating path=`{PATCHES_PATH}`')
 		PATCHES_PATH.mkdir(parents=True, exist_ok=True)
 
-	if not CONFIG_PATH.exists():
-		config = {'repos': {}}
+	if MANIFEST_PATH.exists():
+		manifest = json.loads(MANIFEST_PATH.read_text(encoding='utf-8'))
+		# Both names present is what a crash between the write and the unlink of a
+		# rename leaves behind, and there the new file is simply the newer one. It
+		# is also what a merge with someone still running an older version leaves
+		# behind -- and there the old file can hold a repository this one has never
+		# heard of, which unlinking would throw away.
+		if LEGACY_MANIFEST_PATH.exists():
+			legacy = json.loads(LEGACY_MANIFEST_PATH.read_text(encoding='utf-8'))
+			lost = sorted(set(legacy['repos']) - set(manifest['repos']))
+			if lost:
+				print(
+					f'`{LEGACY_MANIFEST_PATH}` describes repos that `{MANIFEST_PATH.name}`'
+					f' does not: {", ".join(lost)}.'
+					f' Merge them by hand, then delete `{LEGACY_MANIFEST_PATH.name}`',
+					file=sys.stderr,
+				)
+				sys.exit(1)
+	elif LEGACY_MANIFEST_PATH.exists():
+		logging.info(f'reading legacy manifest path=`{LEGACY_MANIFEST_PATH}`')
+		manifest = json.loads(LEGACY_MANIFEST_PATH.read_text(encoding='utf-8'))
 	else:
-		config = json.loads(CONFIG_PATH.read_text())
+		manifest = {'repos': {}}
 
 
 class Command:
@@ -101,8 +129,196 @@ class Command:
 		file.write('\n')
 
 
+def _write_manifest() -> None:
+	"""
+	Replace the manifest file, all at once.
+
+	Written to a sibling and `os.replace`d, which is atomic within a directory: a
+	failure part-way through the dump would otherwise leave a truncated
+	`manifest.json` behind, and that is every managed repository lost at once, not
+	just the one being operated on.
+	"""
+	tmp = MANIFEST_PATH.with_name(MANIFEST_PATH.name + '.tmp')
+	# Explicit encoding and newline: the manifest is a tracked file shared between
+	# machines, so neither the platform's line ending nor the locale's default
+	# encoding may leak into its bytes.
+	with open(tmp, 'wt', encoding='utf-8', newline='\n') as f:
+		json.dump(manifest, f, indent='\t')
+		f.write('\n')
+	os.replace(tmp, MANIFEST_PATH)
+	# Only once the new name is in place, and never on the way in: this is the
+	# whole of the `config.json` -> `manifest.json` rename.
+	LEGACY_MANIFEST_PATH.unlink(missing_ok=True)
+
+
+# Files the tool owns inside `.git-third-party/`, refreshed on every write.
+#
+# The attributes are not cosmetic. A patch file's name is a digest of its exact
+# bytes, so the enclosing repository must not normalize them: a `* text=auto`
+# rule -- which is the recommended setting, and is in this project's own
+# `.gitattributes` -- would rewrite the CRLF in a patch on `add`, so a fresh
+# clone would silently apply different content, and the next `save` would
+# regenerate the true bytes and refuse with a name collision.
+SAVED_FILES_METADATA = {
+	'.gitattributes': """\
+# Managed by git-third-party.
+
+# Patch names are a digest of the patch bytes: normalizing them changes what
+# gets applied, and breaks the name.
+patches/** -text
+manifest.json text eol=lf
+""",
+	'.gitignore': """\
+# Managed by git-third-party.
+
+# Scratch left behind by an interrupted write.
+*.tmp
+patches/**/*.tmp
+""",
+}
+
+
+def _write_saved_files_metadata() -> None:
+	"""
+	Keep `.git-third-party`'s own git metadata in place.
+
+	Rewritten only when it differs, so an unchanged tree stays untouched: these
+	are tracked files, and churning them would show up as a diff in the enclosing
+	repository on every command.
+	"""
+	for filename, content in SAVED_FILES_METADATA.items():
+		path = SAVED_FILES_PATH.joinpath(filename)
+		if path.exists() and path.read_text(encoding='utf-8') == content:
+			continue
+		logging.info(f'writing `{path}`')
+		path.write_text(content, encoding='utf-8', newline='\n')
+
+
 def _get_patches_dir(name: str) -> Path:
 	return PATCHES_PATH.joinpath(*name.split('/'))
+
+
+# Crockford Base32: no `i`, `l`, `o`, `u`, so a digest can not be misread and is
+# safe in paths, urls and file names. Emitted lower-case; the encoding is
+# case-insensitive, which also keeps names unambiguous on case-folding
+# filesystems.
+_CROCKFORD_ALPHABET = '0123456789abcdefghjkmnpqrstvwxyz'
+
+# 80 bits of SHA-3 is 16 Crockford characters exactly (no padding) and leaves
+# collisions far out of reach for a patch series. SHA-3 rather than SHA-2: it is
+# the current standard, and Keccak is only its pre-standard spelling.
+_PATCH_NAME_BYTES = 10
+
+
+def _crockford32(data: bytes) -> str:
+	"""
+	Encode *data* as Crockford Base32, without padding.
+
+	`len(data) * 8` must be a multiple of 5 (as `_PATCH_NAME_BYTES` is), otherwise
+	the leftover high bits are dropped instead of padded.
+	"""
+	acc = int.from_bytes(data, 'big')
+	digits = []
+	for _ in range(len(data) * 8 // 5):
+		digits.append(_CROCKFORD_ALPHABET[acc & 0b11111])
+		acc >>= 5
+	return ''.join(reversed(digits))
+
+
+def _patch_name(patch: bytes) -> str:
+	"""
+	Content-addressed file name of a patch.
+
+	Hashes the patch *bytes* rather than using `git patch-id`: patch-id ignores
+	the commit message, so two commits with the same diff and different messages
+	would collide into one file and silently lose a message. The bytes are
+	already metadata-stripped (`--zero-commit`, `--no-signature`), so the name is
+	stable across machines, git versions and committers.
+	"""
+	return _crockford32(hashlib.sha3_256(patch).digest()[:_PATCH_NAME_BYTES])
+
+
+def _migrate_patches(name: str) -> None:
+	"""
+	Upgrade a repo entry from the legacy `patches: <count>` schema.
+
+	The old layout named patch files by their 1-based position, so inserting a
+	patch rewrote the content of every file after it. Names are now content
+	addressed and the *order* lives in the manifest. Migration is done in place —
+	the patch bytes are unchanged, only their names are — so it is invisible to
+	`update`, and it runs from any subcommand rather than requiring a `save`.
+	"""
+	conf = manifest['repos'][name]
+	count = conf['patches']
+	if not isinstance(count, int):
+		return
+
+	logging.info(f'migrating {name} to content-addressed patch names')
+	patches_dir = _get_patches_dir(name)
+
+	# Read the whole series first: a migration that cannot be completed must not
+	# leave half of it renamed.
+	contents = []
+	for i in range(1, count + 1):
+		old = patches_dir.joinpath(str(i))
+		if not old.exists():
+			raise GitThirdPartyException(
+				f'repo {name}: patch {i} of {count} is missing ( {old} ), can not migrate'
+			)
+		contents.append(old.read_bytes())
+
+	names = _record_patches(patches_dir, contents, name)
+	conf['patches'] = names
+	# Both layouts are on disk at this point, and a 16-character name never
+	# collides with a positional one. Committing the manifest *before* removing the
+	# old files means every intermediate state is one the manifest describes
+	# truthfully: interrupt anywhere and the worst left behind is unreferenced
+	# positional files, which the next `save` sweeps.
+	_write_manifest()
+	for i in range(1, count + 1):
+		patches_dir.joinpath(str(i)).unlink()
+
+
+def _record_patches(patches_dir: Path, contents: list[bytes], repo: str) -> list[str]:
+	"""
+	Write a patch series under its content-addressed names, in order.
+
+	Every name is resolved before anything is written, so a rejected series
+	leaves no half-written files behind.
+	"""
+	by_name: dict[str, bytes] = {}
+	names = []
+	for data in contents:
+		patch_name = _patch_name(data)
+		# Identical bytes are simply the same patch recorded twice in one series;
+		# different bytes under one name would mean a truncated-digest collision,
+		# and writing would destroy a patch.
+		dst = patches_dir.joinpath(patch_name)
+		if patch_name in by_name:
+			known = by_name[patch_name]
+		elif dst.exists():
+			known = dst.read_bytes()
+		else:
+			known = data
+		if known != data:
+			raise GitThirdPartyException(
+				f'repo {repo}: patch name collision on `{patch_name}` ( {dst} )'
+			)
+		by_name[patch_name] = data
+		names.append(patch_name)
+
+	for patch_name, data in by_name.items():
+		dst = patches_dir.joinpath(patch_name)
+		# Already there with these exact bytes (a re-save of unchanged history):
+		# rewriting it would only churn the mtime.
+		if not dst.exists():
+			# Via a sibling: a patch file truncated by an interrupted write would
+			# be read as a digest collision forever after, and no `save` would
+			# succeed again until it was deleted by hand.
+			tmp = dst.with_name(dst.name + '.tmp')
+			tmp.write_bytes(data)
+			os.replace(tmp, dst)
+	return names
 
 
 def _dirty_check(name: str) -> None:
@@ -123,30 +339,52 @@ def _dirty_check(name: str) -> None:
 			f'repo {name} is dirty ( {target_dir} ):\n{rs.stdout.rstrip()}'
 		)
 
+	# A `git am` that stopped on a conflict leaves its state behind while the
+	# working tree reads as perfectly clean, and every later `am` refuses with
+	# `previous rebase directory ... still exists`. Say so here instead, where
+	# there is a name to blame and an instruction to give.
+	git_dir = Path(
+		subprocess.run(
+			[GIT, 'rev-parse', '--absolute-git-dir'],
+			check=True,
+			cwd=target_dir,
+			text=True,
+			capture_output=True,
+		).stdout.strip()
+	)
+	if git_dir.joinpath('rebase-apply').exists():
+		raise GitThirdPartyException(
+			f'repo {name} has an unfinished `git am` ( {target_dir} ); '
+			'finish it with `git am --continue` or drop it with `git am --abort`'
+		)
 
-def _patch_id(diff: str, cwd: Path) -> str | None:
-	"""Stable patch-id of a diff/patch, or None when there is nothing to hash.
+
+def _patch_id(diff: bytes, cwd: Path) -> str | None:
+	"""
+	Stable patch-id of a diff/patch, or None when there is nothing to hash.
 
 	`--stable` hashes only the diff hunks, ignoring the commit hash, author,
 	date and message — so a patch re-applied by `git am` compares equal to the
 	saved patch file it came from, which is exactly the metadata-independence the
 	rest of the tool relies on.
 	"""
+	# Bytes in, like everywhere else patches are handled: a commit message need
+	# not be valid UTF-8, and decoding one just to hash it could fail.
 	rs = subprocess.run(
 		[GIT, 'patch-id', '--stable'],
 		input=diff,
-		text=True,
 		capture_output=True,
 		check=True,
 		cwd=cwd,
 	)
-	out = rs.stdout.strip()
+	out = rs.stdout.decode().strip()
 	# Empty for a patch with no textual diff (e.g. an empty or merge commit).
 	return out.split()[0] if out else None
 
 
 def _unsaved_commits_check(name: str) -> None:
-	"""Refuse to overwrite local commits that were never `save`d.
+	"""
+	Refuse to overwrite local commits that were never `save`d.
 
 	`update` detaches to the base commit and replays the *saved* patch series, so
 	any commit on top that no patch file records would be silently orphaned. We
@@ -154,7 +392,7 @@ def _unsaved_commits_check(name: str) -> None:
 	patch-id, keep the longest matching prefix (K), and error when the checkout
 	is *ahead* — carrying `commits(base..HEAD) - K` unrecorded commits.
 	"""
-	conf = config['repos'][name]
+	conf = manifest['repos'][name]
 	target_dir = top_dir.joinpath(*name.split('/'))
 	base = conf['commit']
 
@@ -201,7 +439,6 @@ def _unsaved_commits_check(name: str) -> None:
 				[GIT, 'diff-tree', '--patch', '--no-commit-id', rev],
 				check=True,
 				cwd=target_dir,
-				text=True,
 				capture_output=True,
 			).stdout,
 			target_dir,
@@ -211,8 +448,8 @@ def _unsaved_commits_check(name: str) -> None:
 
 	patches_dir = _get_patches_dir(name)
 	saved_ids = [
-		_patch_id(patches_dir.joinpath(str(i)).read_text(), target_dir)
-		for i in range(1, conf['patches'] + 1)
+		_patch_id(patches_dir.joinpath(patch).read_bytes(), target_dir)
+		for patch in conf['patches']
 	]
 
 	# Longest common prefix of patch-ids; a None (unhashable commit) stops it.
@@ -245,7 +482,7 @@ def _ensure_origin(target_dir: Path, url: str) -> None:
 	)
 	if not has_origin:
 		subprocess.run([GIT, 'remote', 'add', 'origin', url], check=True, cwd=target_dir)
-	# Both unconditional: the config is the source of truth for where the code
+	# Both unconditional: the manifest is the source of truth for where the code
 	# comes from, and checkouts made by older versions still get the push url.
 	subprocess.run([GIT, 'remote', 'set-url', 'origin', url], check=True, cwd=target_dir)
 	# `set-url --push` only replaces the *first* push url, and git pushes to every
@@ -264,7 +501,7 @@ def _ensure_origin(target_dir: Path, url: str) -> None:
 
 
 def _update_at(name: str) -> None:
-	conf = config['repos'][name]
+	conf = manifest['repos'][name]
 	target_dir = top_dir.joinpath(*name.split('/'))
 	logging.info(f'updating name={name} at path={target_dir}')
 	# `.git`, not the directory itself: an existing but un-initialized directory
@@ -276,9 +513,12 @@ def _update_at(name: str) -> None:
 
 	# The remote is repaired even for a checkout that is about to be refused: a
 	# pushable third-party repo is exactly what this guards against, and rewriting
-	# `.git/config` touches none of the user's work.
+	# `.git/config` touches none of the user's work. The migration is not, so
+	# local changes are refused before any patch file moves; the unsaved-commits
+	# check reads the patch series, so it has to come after the migration.
 	_ensure_origin(target_dir, conf['url'])
 	_dirty_check(name)
+	_migrate_patches(name)
 	_unsaved_commits_check(name)
 	rs = subprocess.run(
 		[GIT, '-c', 'advice.detachedHead=false', 'checkout', conf['commit']],
@@ -319,9 +559,35 @@ def _update_at(name: str) -> None:
 		)
 	# apply patches
 	patches_dir = _get_patches_dir(name)
-	patch_files = [patches_dir.joinpath(str(i)) for i in range(1, conf['patches'] + 1)]
+	patch_files = [patches_dir.joinpath(patch) for patch in conf['patches']]
 	if len(patch_files) != 0:
-		subprocess.run([GIT, 'am', *patch_files], cwd=target_dir, check=True)
+		subprocess.run(
+			[
+				GIT,
+				'am',
+				# A patch file is LF-terminated, so a `\r` in it is *content*: a file
+				# that genuinely has CRLF line endings. Without this, `am` strips it and
+				# `update` silently rewrites the third-party sources.
+				'--keep-cr',
+				# `git am` applies through `git apply`, which rewrites whitespace when
+				# `apply.whitespace=fix` is set locally -- again silently editing the
+				# content the patch describes.
+				'--whitespace=nowarn',
+				# `am.threeWay` turns a patch that does not apply into a merge, which
+				# is a guess at what the patch meant. A refusal the user can look at is
+				# the better failure.
+				'--no-3way',
+				# The commit message is part of the patch bytes, so a trailer appended
+				# by `am.messageId` would change every name in the series on the next
+				# `save`. It can only fire on a patch that carries a `Message-Id`
+				# header, which `format-patch --no-thread` does not write -- this keeps
+				# it that way if that ever changes.
+				'--no-message-id',
+			]
+			+ patch_files,
+			cwd=target_dir,
+			check=True,
+		)
 	else:
 		logging.warning('no patches detected')
 
@@ -359,8 +625,8 @@ class AddCommand(Command):
 			print(f'bad path `{path}`', file=sys.stderr)
 			sys.exit(1)
 		name = _get_path_rel_to_dir(path)
-		if name in config['repos']:
-			print(f'repo ({name}) is already in config', file=sys.stderr)
+		if name in manifest['repos']:
+			print(f'repo ({name}) is already in manifest', file=sys.stderr)
 			sys.exit(1)
 		target_dir = top_dir.joinpath(*name.split('/'))
 		res = subprocess.run([GIT, 'check-ignore', target_dir], check=False)
@@ -368,16 +634,16 @@ class AddCommand(Command):
 			raise GitThirdPartyException(
 				f'target directory ({target_dir}) is not ignored by git'
 			)
-		config['repos'][name] = {
+		manifest['repos'][name] = {
 			'url': repo,
 			'commit': commit,
-			'patches': 0,
+			'patches': [],
 		}
 		_update_at(name)
 
 
 def _get_all_names() -> list[str]:
-	return list(config['repos'].keys())
+	return list(manifest['repos'].keys())
 
 
 def _get_names_from_paths(paths: list[str]) -> list[str]:
@@ -420,42 +686,75 @@ class SaveCommand(Command):
 
 def _save_at(name: str) -> None:
 	target_dir = top_dir.joinpath(*name.split('/'))
-	conf = config['repos'][name]
+	conf = manifest['repos'][name]
 	# Also from `save`, so a checkout that is only ever saved still loses its
 	# ability to push upstream.
 	_ensure_origin(target_dir, conf['url'])
 	_dirty_check(name)
+	_migrate_patches(name)
 	logging.info(f'saving name={name} at path={target_dir}')
 	patches_dir = _get_patches_dir(name)
-	for i in range(1, conf['patches'] + 1):
-		patches_dir.joinpath(str(i)).unlink()
 	patches_dir.mkdir(parents=True, exist_ok=True)
 
-	subprocess.run(
-		[
-			GIT,
-			'format-patch',
-			f'{conf["commit"]}..HEAD',
-			'--no-numbered',
-			'--zero-commit',
-			'--no-signature',
-			'--numbered-files',
-			'-o',
-			patches_dir,
-		],
-		check=True,
-		cwd=target_dir,
-	)
-	new_patches = subprocess.run(
-		[GIT, 'rev-list', '--count', f'{conf["commit"]}..HEAD'],
-		check=True,
-		cwd=target_dir,
-		text=True,
-		capture_output=True,
-	)
-	patches_cnt = int(new_patches.stdout.strip())
-	logging.info(f'number of patches is {patches_cnt}')
-	conf['patches'] = patches_cnt
+	# Generated aside and moved in afterwards: `--numbered-files` names patches by
+	# their position in the series, which is exactly what the final names must not
+	# depend on, and it would otherwise clash with the files already there.
+	# Outside the tracked tree, so an interrupted save can not leave scratch files
+	# showing up as dirt in the enclosing repository.
+	with tempfile.TemporaryDirectory(prefix='git-third-party-') as tmp:
+		subprocess.run(
+			[
+				GIT,
+				'format-patch',
+				f'{conf["commit"]}..HEAD',
+				'--no-numbered',
+				'--zero-commit',
+				'--no-signature',
+				'--numbered-files',
+				# One file per commit, byte-identical whatever `format.*` the checkout
+				# happens to carry: a cover letter would be recorded as a patch of its
+				# own, and a header, recipient, base, note or sign-off would make the
+				# bytes -- and therefore every name in the series -- depend on local
+				# configuration. `--no-from` matters most: it is the one that would
+				# write the local committer into the patch.
+				'--no-cover-letter',
+				'--no-attach',
+				'--no-thread',
+				'--no-notes',
+				'--no-signoff',
+				'--no-base',
+				'--no-from',
+				'--no-to',
+				'--no-cc',
+				# `format.headers` is multi-valued, so it can only be cleared, not
+				# overridden.
+				'--no-add-header',
+				'--subject-prefix=PATCH',
+				'-o',
+				tmp,
+			],
+			check=True,
+			cwd=target_dir,
+		)
+		generated = sorted(Path(tmp).iterdir(), key=lambda p: int(p.name))
+		contents = [src.read_bytes() for src in generated]
+
+	names = _record_patches(patches_dir, contents, name)
+	logging.info(f'number of patches is {len(names)}')
+	conf['patches'] = names
+	# Before the sweep, and before the command as a whole finishes: the new series
+	# is fully on disk, so committing the manifest here means no interruption -- and
+	# no failure on the *next* repo of a `--all` run -- can leave this repo
+	# pointing at a file that was already deleted.
+	_write_manifest()
+
+	# Patches dropped from the series (or renamed by an edit) leave their files
+	# behind; sweep them so the directory is exactly the current series. Only
+	# files: a nested repo keeps its own patches in a subdirectory.
+	keep = set(names)
+	for stale in list(patches_dir.iterdir()):
+		if stale.is_file() and stale.name not in keep:
+			stale.unlink()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -486,9 +785,8 @@ def main(argv: list[str] | None = None) -> int:
 		print(*e.args, file=sys.stderr)
 		return 1
 
-	with open(CONFIG_PATH, 'wt') as f:
-		json.dump(config, f, indent='\t')
-		f.write('\n')
+	_write_saved_files_metadata()
+	_write_manifest()
 
 	return 0
 

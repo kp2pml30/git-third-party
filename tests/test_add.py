@@ -1,4 +1,6 @@
-"""`add` subcommand: registering and checking out a third-party repo."""
+"""
+`add` subcommand: registering and checking out a third-party repo.
+"""
 
 import pytest
 
@@ -13,24 +15,24 @@ def test_add_checks_out_pinned_commit(gtp, workspace, upstreams):
 	assert (target / 'lib.txt').read_text() == 'alpha\n'
 
 
-def test_add_writes_config_entry(gtp, workspace, upstreams, read_config):
+def test_add_writes_manifest_entry(gtp, workspace, upstreams, read_manifest):
 	simple = upstreams['simple']
 	assert (
 		gtp('add', 'third-party/simple', str(simple['path']), simple['c1']).returncode == 0
 	)
-	entry = read_config()['repos']['third-party/simple']
+	entry = read_manifest()['repos']['third-party/simple']
 	assert entry == {
 		'url': str(simple['path']),
 		'commit': simple['c1'],
-		'patches': 0,
+		'patches': [],
 	}
 
 
 def test_add_rejects_wrong_arg_count(gtp, workspace):
 	res = gtp('add', 'third-party/x')
 	assert res.returncode == 1
-	# A failed add must not persist a config.
-	assert not (workspace / '.git-third-party' / 'config.json').exists()
+	# A failed add must not persist a manifest.
+	assert not (workspace / '.git-third-party' / 'manifest.json').exists()
 
 
 @pytest.mark.parametrize('bad', ['a:b', 'a;b', 'a\\b'])
@@ -39,7 +41,7 @@ def test_add_rejects_bad_path_chars(gtp, workspace, upstreams, bad):
 	res = gtp('add', f'third-party/{bad}', str(simple['path']), simple['c1'])
 	assert res.returncode == 1
 	assert 'bad path' in res.stderr
-	assert not (workspace / '.git-third-party' / 'config.json').exists()
+	assert not (workspace / '.git-third-party' / 'manifest.json').exists()
 
 
 def test_add_rejects_path_outside_repo(gtp, workspace, upstreams, tmp_path):
@@ -65,4 +67,4 @@ def test_add_rejects_duplicate(gtp, workspace, upstreams):
 	)
 	res = gtp('add', 'third-party/simple', str(simple['path']), simple['c1'])
 	assert res.returncode == 1
-	assert 'already in config' in res.stderr
+	assert 'already in manifest' in res.stderr

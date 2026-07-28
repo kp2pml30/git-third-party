@@ -65,8 +65,8 @@ def gtp(workspace, base_env):
 
 
 @pytest.fixture
-def read_config(workspace):
+def read_manifest(workspace):
 	def read() -> dict:
-		return json.loads((workspace / '.git-third-party' / 'config.json').read_text())
+		return json.loads((workspace / '.git-third-party' / 'manifest.json').read_text())
 
 	return read

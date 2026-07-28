@@ -1,5 +1,7 @@
-"""Patches must be deterministic: the identity of whoever re-applies and
-re-saves them must not change a single byte of the stored patches."""
+"""
+Patches must be deterministic: the identity of whoever re-applies and
+re-saves them must not change a single byte of the stored patches.
+"""
 
 from fixtures import commit_files, run_tool
 
@@ -32,7 +34,7 @@ def test_save_update_save_is_identity_independent(
 		run_tool(workspace, ['save', 'third-party/simple'], env=base_env).returncode == 0
 	)
 	first = _patches(pdir)
-	assert set(first) == {'1', '2'}
+	assert len(first) == 2
 
 	# re-apply and re-save as a *different* identity B (different author name,
 	# email, committer, and both author/committer dates).

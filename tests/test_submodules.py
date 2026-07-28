@@ -43,12 +43,12 @@ def test_submodule_survives_roundtrip(gtp, workspace, base_env, upstreams):
 
 def test_update_with_explicit_submodule_list(gtp, workspace, upstreams):
 	_, target = _add_parent(gtp, workspace, upstreams)
-	# Pin an explicit submodule list in the config and re-materialize, taking
+	# Pin an explicit submodule list in the manifest and re-materialize, taking
 	# the `submodules` branch of update.
-	cfg_path = workspace / '.git-third-party' / 'config.json'
-	cfg = json.loads(cfg_path.read_text())
-	cfg['repos']['third-party/parent']['submodules'] = ['sub']
-	cfg_path.write_text(json.dumps(cfg))
+	manifest_path = workspace / '.git-third-party' / 'manifest.json'
+	manifest = json.loads(manifest_path.read_text())
+	manifest['repos']['third-party/parent']['submodules'] = ['sub']
+	manifest_path.write_text(json.dumps(manifest))
 
 	shutil.rmtree(target)
 	assert gtp('update', 'third-party/parent').returncode == 0
@@ -57,10 +57,10 @@ def test_update_with_explicit_submodule_list(gtp, workspace, upstreams):
 
 def test_empty_submodule_list_still_checks_out(gtp, workspace, upstreams):
 	_, target = _add_parent(gtp, workspace, upstreams)
-	cfg_path = workspace / '.git-third-party' / 'config.json'
-	cfg = json.loads(cfg_path.read_text())
-	cfg['repos']['third-party/parent']['submodules'] = []
-	cfg_path.write_text(json.dumps(cfg))
+	manifest_path = workspace / '.git-third-party' / 'manifest.json'
+	manifest = json.loads(manifest_path.read_text())
+	manifest['repos']['third-party/parent']['submodules'] = []
+	manifest_path.write_text(json.dumps(manifest))
 
 	shutil.rmtree(target)
 	assert gtp('update', 'third-party/parent').returncode == 0
