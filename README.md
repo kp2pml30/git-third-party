@@ -65,6 +65,10 @@ reapplies them.
 The `.git-third-party` directory must be tracked by git, while the third-party
 working trees themselves should not be.
 
+Each managed checkout gets its push url disabled (`origin` fetches from
+upstream, but pushing fails), so local patch commits can not accidentally be
+pushed to the third-party project.
+
 Best effort is made to keep patches deterministic and to strip metadata from
 them, including:
 

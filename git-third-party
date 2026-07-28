@@ -31,6 +31,16 @@ from pathlib import Path
 
 EXE_NAME = 'git third-party'
 
+# Push url forced onto `origin` of every managed checkout, so an accidental
+# `git push` from inside a third-party directory fails loudly instead of writing
+# to the upstream project. Fetching is unaffected: git only uses
+# `remote.<name>.pushurl` for pushes.
+#
+# A scheme, not a bare word: a bare word is a *relative path*, and would happily
+# push into a repository that happened to sit under that name. No transport
+# implements this scheme, so git can only refuse.
+NO_PUSH_URL = 'no-push://disabled-by-git-third-party'
+
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 
 # Runtime context, populated by `_init_context()` at the start of each `main()`
@@ -220,17 +230,54 @@ def _unsaved_commits_check(name: str) -> None:
 		)
 
 
+def _ensure_origin(target_dir: Path, url: str) -> None:
+	"""
+	Point `origin` at the configured url, and make it impossible to push to.
+	"""
+	has_origin = (
+		subprocess.run(
+			[GIT, 'remote', 'get-url', 'origin'],
+			check=False,
+			cwd=target_dir,
+			capture_output=True,
+		).returncode
+		== 0
+	)
+	if not has_origin:
+		subprocess.run([GIT, 'remote', 'add', 'origin', url], check=True, cwd=target_dir)
+	# Both unconditional: the config is the source of truth for where the code
+	# comes from, and checkouts made by older versions still get the push url.
+	subprocess.run([GIT, 'remote', 'set-url', 'origin', url], check=True, cwd=target_dir)
+	# `set-url --push` only replaces the *first* push url, and git pushes to every
+	# one that is configured -- so drop them all before setting ours. Exits 5 when
+	# there is nothing to unset, which is the common case.
+	subprocess.run(
+		[GIT, 'config', '--unset-all', 'remote.origin.pushurl'],
+		check=False,
+		cwd=target_dir,
+	)
+	subprocess.run(
+		[GIT, 'remote', 'set-url', '--push', 'origin', NO_PUSH_URL],
+		check=True,
+		cwd=target_dir,
+	)
+
+
 def _update_at(name: str) -> None:
 	conf = config['repos'][name]
 	target_dir = top_dir.joinpath(*name.split('/'))
 	logging.info(f'updating name={name} at path={target_dir}')
-	if not target_dir.exists():
+	# `.git`, not the directory itself: an existing but un-initialized directory
+	# must still become its own repository, otherwise every git command below
+	# would silently operate on the *enclosing* repository.
+	if not target_dir.joinpath('.git').exists():
 		target_dir.mkdir(parents=True, exist_ok=True)
 		subprocess.run([GIT, 'init'], check=True, cwd=target_dir)
-		subprocess.run(
-			[GIT, 'remote', 'add', 'origin', conf['url']], check=True, cwd=target_dir
-		)
 
+	# The remote is repaired even for a checkout that is about to be refused: a
+	# pushable third-party repo is exactly what this guards against, and rewriting
+	# `.git/config` touches none of the user's work.
+	_ensure_origin(target_dir, conf['url'])
 	_dirty_check(name)
 	_unsaved_commits_check(name)
 	rs = subprocess.run(
@@ -372,10 +419,13 @@ class SaveCommand(Command):
 
 
 def _save_at(name: str) -> None:
-	_dirty_check(name)
 	target_dir = top_dir.joinpath(*name.split('/'))
-	logging.info(f'saving name={name} at path={target_dir}')
 	conf = config['repos'][name]
+	# Also from `save`, so a checkout that is only ever saved still loses its
+	# ability to push upstream.
+	_ensure_origin(target_dir, conf['url'])
+	_dirty_check(name)
+	logging.info(f'saving name={name} at path={target_dir}')
 	patches_dir = _get_patches_dir(name)
 	for i in range(1, conf['patches'] + 1):
 		patches_dir.joinpath(str(i)).unlink()
