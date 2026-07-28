@@ -1,4 +1,5 @@
-"""`update` subcommand and the save -> wipe -> update round-trip.
+"""
+`update` subcommand and the save -> wipe -> update round-trip.
 
 These tests are the precise witnesses that the tool never loses information:
 after a round-trip the working tree is byte-for-byte identical and the

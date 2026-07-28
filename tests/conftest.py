@@ -1,4 +1,6 @@
-"""pytest fixtures: hermetic, offline git repositories for the tool tests."""
+"""
+pytest fixtures: hermetic, offline git repositories for the tool tests.
+"""
 
 import json
 from pathlib import Path
@@ -20,9 +22,11 @@ def base_env(tmp_path_factory) -> dict:
 
 @pytest.fixture(scope='session')
 def alt_env(base_env) -> dict:
-	"""A second identity (name, email, committer, dates all different) sharing
+	"""
+	A second identity (name, email, committer, dates all different) sharing
 	the same global git config. Used to prove the person who re-applies/saves a
-	patch does not leak into the patch bytes."""
+	patch does not leak into the patch bytes.
+	"""
 	env = dict(base_env)
 	env.update(
 		{
@@ -50,7 +54,9 @@ def workspace(tmp_path, base_env) -> Path:
 
 @pytest.fixture
 def gtp(workspace, base_env):
-	"""Run the tool inside the workspace; returns the CompletedProcess."""
+	"""
+	Run the tool inside the workspace; returns the CompletedProcess.
+	"""
 
 	def run(*args, cwd: Path | None = None):
 		return run_tool(workspace, list(args), cwd=cwd, env=base_env)

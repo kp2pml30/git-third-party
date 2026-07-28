@@ -1,4 +1,5 @@
-"""Offline test fixtures for git-third-party.
+"""
+Offline test fixtures for git-third-party.
 
 Everything here builds *local* git repositories on disk so the test-suite never
 touches the network. Upstream repos are served over plain filesystem paths and
@@ -51,7 +52,9 @@ GLOBAL_GITCONFIG = """\
 
 
 def make_env(home: Path) -> dict:
-	"""A hermetic git environment rooted at *home* (isolated global config)."""
+	"""
+	A hermetic git environment rooted at *home* (isolated global config).
+	"""
 	gitconfig = home / '.gitconfig'
 	gitconfig.write_text(GLOBAL_GITCONFIG)
 	env = dict(os.environ)
@@ -76,7 +79,9 @@ def git(args: list[str], cwd: Path, env: dict) -> subprocess.CompletedProcess:
 
 
 def commit_files(repo: Path, env: dict, files: dict[str, str], message: str) -> str:
-	"""Write *files* (relative path -> content), commit them, return the sha."""
+	"""
+	Write *files* (relative path -> content), commit them, return the sha.
+	"""
 	for rel, content in files.items():
 		path = repo.joinpath(*rel.split('/'))
 		path.parent.mkdir(parents=True, exist_ok=True)
@@ -92,7 +97,9 @@ def _allow_sha(repo: Path, env: dict) -> None:
 
 
 def build_upstreams(base: Path, env: dict) -> dict:
-	"""Create the upstream repositories the tests fetch from. All offline."""
+	"""
+	Create the upstream repositories the tests fetch from. All offline.
+	"""
 	base.mkdir(parents=True, exist_ok=True)
 
 	# A plain two-commit repo. Tests pin at `c1` so the tool must fetch a commit
@@ -125,7 +132,9 @@ def build_upstreams(base: Path, env: dict) -> dict:
 
 
 def make_workspace(ws: Path, env: dict) -> Path:
-	"""An outer git repo that ignores `/third-party` (where repos are placed)."""
+	"""
+	An outer git repo that ignores `/third-party` (where repos are placed).
+	"""
 	git(['init'], _mk(ws), env)
 	(ws / '.gitignore').write_text('/third-party\n')
 	git(['add', '.gitignore'], ws, env)
@@ -141,7 +150,8 @@ class ToolResult:
 
 
 def _load_tool():
-	"""Import the extensionless `git-third-party` script as a module (cached).
+	"""
+	Import the extensionless `git-third-party` script as a module (cached).
 
 	Driving the tool in-process (rather than as a subprocess) lets `pytest-cov`
 	measure it directly, so plain `--cov`/`--cov-branch` reports real coverage.
@@ -154,6 +164,16 @@ def _load_tool():
 
 
 _TOOL_MODULE = None
+
+
+def tool_module():
+	"""
+	The imported tool module, so tests can monkeypatch its internals.
+	"""
+	global _TOOL_MODULE
+	if _TOOL_MODULE is None:
+		_TOOL_MODULE = _load_tool()
+	return _TOOL_MODULE
 
 
 def run_tool(
@@ -189,7 +209,8 @@ def _mk(path: Path) -> Path:
 
 
 def tree_sha(repo: Path, env: dict) -> str:
-	"""Content-addressed sha of the committed tree (metadata-independent).
+	"""
+	Content-addressed sha of the committed tree (metadata-independent).
 
 	Two checkouts with identical file content share this sha even if the commit
 	hashes differ, so it is the precise witness for "no information was lost".
@@ -198,7 +219,8 @@ def tree_sha(repo: Path, env: dict) -> str:
 
 
 def snapshot_worktree(root: Path) -> dict[str, str]:
-	"""Map every file in the working tree to a hash of its content.
+	"""
+	Map every file in the working tree to a hash of its content.
 
 	Walks the whole tree (including submodule checkouts), skipping `.git`
 	metadata (a directory in a normal repo, a file in a submodule). Symlinks are

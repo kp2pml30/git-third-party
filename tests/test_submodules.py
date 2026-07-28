@@ -1,5 +1,7 @@
-"""Submodules, offline. A repo with a local-path submodule must be checked out
-and survive a save -> wipe -> update round-trip without losing information."""
+"""
+Submodules, offline. A repo with a local-path submodule must be checked out
+and survive a save -> wipe -> update round-trip without losing information.
+"""
 
 import json
 import shutil

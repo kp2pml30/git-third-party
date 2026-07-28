@@ -1,5 +1,7 @@
-"""The real command-line entrypoint (`__main__` guard, argv parsing), driven as
-an actual subprocess so the installed script is exercised end to end."""
+"""
+The real command-line entrypoint (`__main__` guard, argv parsing), driven as
+an actual subprocess so the installed script is exercised end to end.
+"""
 
 import subprocess
 import sys

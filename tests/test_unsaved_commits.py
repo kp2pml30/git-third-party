@@ -1,4 +1,5 @@
-"""`update` must not silently drop local commits that were never `save`d.
+"""
+`update` must not silently drop local commits that were never `save`d.
 
 Before detaching to the base commit, the guard reconstructs the saved patch
 series by patch-id, finds the longest matching prefix against the current
@@ -47,7 +48,9 @@ def test_update_allows_exactly_saved_history(gtp, workspace, base_env, upstreams
 
 
 def test_update_allows_extra_saved_patches(gtp, workspace, base_env, upstreams):
-	"""Fewer local commits than saved patches is *behind*, not ahead: allowed."""
+	"""
+	Fewer local commits than saved patches is *behind*, not ahead: allowed.
+	"""
 	target = _add_and_save_one(gtp, workspace, base_env, upstreams)
 	commit_files(target, base_env, {'b.txt': 'b\n'}, 'feat: second')
 	assert gtp('save', 'third-party/simple').returncode == 0  # now 2 patches saved
@@ -62,8 +65,10 @@ def test_update_allows_extra_saved_patches(gtp, workspace, base_env, upstreams):
 
 
 def test_update_refuses_amended_commit(gtp, workspace, base_env, upstreams):
-	"""A commit rewritten in place (same count, different content) diverges from
-	the saved patch at that position and must be refused."""
+	"""
+	A commit rewritten in place (same count, different content) diverges from
+	the saved patch at that position and must be refused.
+	"""
 	target = _add_and_save_one(gtp, workspace, base_env, upstreams)
 	simple = upstreams['simple']
 	# Replace the single saved commit with a different one at the same position.
@@ -77,8 +82,10 @@ def test_update_refuses_amended_commit(gtp, workspace, base_env, upstreams):
 
 
 def test_update_refuses_unsaved_empty_commit(gtp, workspace, base_env, upstreams):
-	"""An empty commit has no diff (patch-id None); it is still unrecorded work
-	and must be refused rather than dropped."""
+	"""
+	An empty commit has no diff (patch-id None); it is still unrecorded work
+	and must be refused rather than dropped.
+	"""
 	simple = upstreams['simple']
 	assert (
 		gtp('add', 'third-party/simple', str(simple['path']), simple['c1']).returncode == 0
@@ -95,8 +102,10 @@ def test_update_refuses_unsaved_empty_commit(gtp, workspace, base_env, upstreams
 
 
 def test_update_skips_check_when_base_bumped(gtp, workspace, base_env, upstreams):
-	"""Bumping the pinned commit to one absent from the checkout can't be related
-	to the saved series, so the guard steps aside and update re-pins."""
+	"""
+	Bumping the pinned commit to one absent from the checkout can't be related
+	to the saved series, so the guard steps aside and update re-pins.
+	"""
 	target = _add_and_save_one(gtp, workspace, base_env, upstreams)
 	simple = upstreams['simple']
 
